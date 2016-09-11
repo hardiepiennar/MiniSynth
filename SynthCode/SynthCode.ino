@@ -206,7 +206,7 @@ void setup() {
   //Initialize device and set defaults
   initDeviceRegisters();
   
-  freq = 95800000;
+  freq = 55000000;
   setRegistersForFrequency(freq);
   
   //Turn on RF 
@@ -217,12 +217,26 @@ void setup() {
 // the loop routine runs over and over again forever:
 void loop() {
  
-  manualControl();
-  
+  //manualControl();
+  modeSelect();
   updateScreen();
 
   
   delay(100);
+}
+
+void modeSelect()
+{
+  if(analogRead(0) > 512 and freq != 55000000)
+  {
+    freq = 55000000;
+    setRegistersForFrequency(freq);
+  }
+  if(analogRead(0) <= 512 and freq != 90000000)
+  {
+    freq = 90000000;
+    setRegistersForFrequency(freq);
+  }
 }
 
 void manualControl()
