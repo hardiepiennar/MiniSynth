@@ -36,6 +36,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
 #endif
 
+//Synth Pin Definitions
 #define PWPin 2
 #define ENPin 3
 #define RFENPin 5
@@ -45,11 +46,19 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define MUXPin 12
 #define CLKPin 13
 
+//Attenuator Pin Definitions
+//A7 -- Attenuator shdn pin
+#define ATTEN_CLK 9
+#define ATTEN_DIN 7
+#define ATTEN_DOUT 8
+#define ATTEN_CS 6
+
 long readRegister();
 void initDeviceRegisters();
 void writeRegister(unsigned long data);
 
-/*Register switches and addre*/
+/*########################SYNTH##############################*/
+/*Register switches and addresses*/
 //Adresses
 const unsigned long Reg0 = (long)0b000;
 const unsigned long Reg1 = (long)0b001;
@@ -161,9 +170,14 @@ unsigned long reg3Default;
 unsigned long reg4Default;
 unsigned long reg5Default;
 
-long freq = 95800000;
+/*#####################ATTENUATOR########################*/
+
+
+
+long freq = 55000000;
 int amplitude = 0;
 boolean up = true;
+unsigned int attenuation = 0; //10bit 46dB 0.045dB steps
 
 // the setup routine runs once when you press reset:
 void setup() {  
@@ -176,6 +190,12 @@ void setup() {
   pinMode(DATAPin, OUTPUT);  
   pinMode(CLKPin, OUTPUT); 
   pinMode(MUXPin, INPUT);
+
+  pinMode(SHDN, OUTPUT);
+  pinMode(ATTEN_CLK, OUTPUT); 
+  pinMode(ATTEN_DIN, OUTPUT);
+  pinMode(ATTEN_DOUT, INPUT);  
+  pinMode(ATTEN_CS, OUTPUT); 
   
   //Initialize screen
   
@@ -187,6 +207,14 @@ void setup() {
   digitalWrite(RFENPin,LOW);
   //Set Latch
   digitalWrite(LEPin,HIGH);  
+
+  //Initialize attenuator
+  //Make sure power is off
+  digitalWrite(A7,LOW);
+  //Disable comunication
+  digitalWrite(ATTEN_CS,HIGH);
+  digitalWrite(ATTEN_DIN,LOW);
+  digitalWrite(ATTEN_CLK,LOW);
   
   //Setup serial port
   Serial.begin(9600);
@@ -202,13 +230,21 @@ void setup() {
   digitalWrite(ENPin,HIGH);
   //Wait for internals to settle
   delay(10);
+
+  //Turn on attenuator power
+  digitalWrite(A7,HIGH);
+  //Wait for internals to settle
+  delay(10);
   
   //Initialize device and set defaults
   initDeviceRegisters();
   
   freq = 55000000;
   setRegistersForFrequency(freq);
-  
+
+  writeAttenDAC(0b1110000000);
+  //Serial.println("Reading");
+  //readAttenDAC();
   //Turn on RF 
   digitalWrite(RFENPin,HIGH);
   
@@ -218,11 +254,11 @@ void setup() {
 void loop() {
  
   //manualControl();
-  modeSelect();
+  //modeSelect();
   updateScreen();
 
   
-  delay(100);
+  delay(1000);
 }
 
 void modeSelect()
@@ -243,14 +279,13 @@ void manualControl()
 {
   int coarseFreq = analogRead(0); 
   int fineFreq = analogRead(1); 
-  int amplitudeInput = analogRead(2); 
+  //attenuation = analogRead(2); 
   
   freq = ((((long)coarseFreq)*600000) + ((long)fineFreq)*10000) - ((((long)coarseFreq)*600000) + ((long)fineFreq)*10000)%100000;
-  amplitude = amplitudeInput/256;
+
   //TODO: Amplitude control must still be implemented into registers
   setRegistersForFrequency(freq);
-
-
+  
 }
 
 void updateScreen()
@@ -268,22 +303,163 @@ void updateScreen()
     display.setCursor(90,0);    
     display.println("MHz");
     
-    display.setCursor(0,20);    
+    display.setCursor(0,16);    
     display.println("Ampl: ");    
-    display.setCursor(50,20);    
+    display.setCursor(50,16);    
     display.println(((float)amplitude)*3 - 4);    
-    display.setCursor(90,20);    
+    display.setCursor(90,16);    
     display.println("dBm");
+
+    display.setCursor(0,30);    
+    display.println("Atten: ");    
+    display.setCursor(50,30);    
+    display.println(attenuation);    
+    display.setCursor(90,30);    
+    display.println("dB");
     
-    display.setCursor(0,40);    
+    display.setCursor(0,45);    
     display.println("Bat: ");    
-    display.setCursor(50,40);    
+    display.setCursor(50,45);    
     display.println(getBatteryVoltage());    
-    display.setCursor(90,40);    
+    display.setCursor(90,45);    
     display.println("V");
     
     display.display();
 }
+
+void setAttenuation(float atten)
+{
+  //TODO: Fix this!!!!!!!!!
+  //Convert attenuation to DAC level
+  int dac_setting = (int)(atten/((float)46/(float)1023)); 
+  //Write the dac value to the attenuator
+  writeAttenDAC(dac_setting);
+}
+
+void writeAttenDAC(unsigned int dac_setting)
+{
+  //Bring down CS pin
+  digitalWrite(ATTEN_CS,LOW);
+  delay(1);
+  //dac_setting = 0b0011111111;
+  Serial.println(dac_setting,BIN);
+  
+  //Set to write mode
+  digitalWrite(ATTEN_DIN,LOW);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+
+  //Set register to 0
+  digitalWrite(ATTEN_DIN,LOW);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+
+
+
+  //Write 10 bit dac value
+  unsigned long buffer = 0;
+  byte i = 0;
+  for(i = 0;i < 10;i++)
+  {
+    Serial.print("writing bit: ");
+    //Set pin state to MSB in stream data
+    buffer = dac_setting&0b1000000000;
+    if(buffer)
+    {
+       digitalWrite(ATTEN_DIN,HIGH);
+       Serial.println(1);
+    }
+    else
+    {
+       digitalWrite(ATTEN_DIN,LOW);
+       Serial.println(0);
+    }
+    
+    //Shift data to next bit for following transfer
+    dac_setting = dac_setting<<1;
+    
+    //Wait some time and throw clk
+    delay(1);
+    digitalWrite(ATTEN_CLK,HIGH);
+    delay(1);
+    digitalWrite(ATTEN_CLK,LOW);
+    delay(1);
+  }
+  delay(1);
+
+  //Bring up the CS pin to latch in the value
+  digitalWrite(ATTEN_CS,HIGH);
+  delay(1);
+}
+
+void readAttenDAC()
+{
+  //Bring down CS pin
+  digitalWrite(ATTEN_CS,LOW);
+  delay(1);
+  
+  //Set to read mode
+  digitalWrite(ATTEN_DIN,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+
+  //Set register to 0
+  digitalWrite(ATTEN_DIN,LOW);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+  digitalWrite(ATTEN_CLK,HIGH);
+  delay(1);
+  digitalWrite(ATTEN_CLK,LOW);
+  delay(1);
+
+
+
+  //Write 10 bit dac value
+  unsigned long buffer = 0;
+  byte i = 0;
+  for(i = 0;i < 10;i++)
+  {
+    Serial.print("reading bit: ");
+    //Set pin state to MSB in stream data
+    
+    if(digitalRead(ATTEN_DOUT))
+    {
+       Serial.println(1);
+    }
+    else
+    {
+       Serial.println(0);
+    }     
+    
+    //Wait some time and throw clk
+    delay(1);
+    digitalWrite(ATTEN_CLK,HIGH);
+    delay(1);
+    digitalWrite(ATTEN_CLK,LOW);
+    delay(1);
+  }
+  delay(1);
+
+  digitalWrite(ATTEN_CS,HIGH);
+  delay(1);
+}
+
 
 float getBatteryVoltage()
 {
