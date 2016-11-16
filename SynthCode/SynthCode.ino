@@ -191,7 +191,7 @@ void setup() {
   pinMode(CLKPin, OUTPUT); 
   pinMode(MUXPin, INPUT);
 
-  pinMode(SHDN, OUTPUT);
+  pinMode(A7, OUTPUT);
   pinMode(ATTEN_CLK, OUTPUT); 
   pinMode(ATTEN_DIN, OUTPUT);
   pinMode(ATTEN_DOUT, INPUT);  
